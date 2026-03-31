@@ -1,0 +1,203 @@
+### Zero Trust IAM — API Test Requests
+### Install the "REST Client" VS Code extension (humao.rest-client) to run these
+### Usage: click "Send Request" above any request block
+
+@base_url = http://localhost:8000
+@keycloak  = http://localhost:8080
+@realm     = zero-trust-demo
+@client_id = policy-engine
+@secret    = policy-engine-secret
+
+### ─────────────────────────────────────────────────────────
+### 1. Health checks
+### ─────────────────────────────────────────────────────────
+
+# @name health_policy
+GET {{base_url}}/health
+
+###
+
+# @name health_risk
+GET http://localhost:8001/health
+
+### ─────────────────────────────────────────────────────────
+### 2. Get tokens from Keycloak
+### ─────────────────────────────────────────────────────────
+
+# @name analyst_token
+POST {{keycloak}}/realms/{{realm}}/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&client_id={{client_id}}&client_secret={{secret}}&username=analyst_bob&password=Analyst@123!&scope=openid
+
+###
+
+# @name engineer_token
+POST {{keycloak}}/realms/{{realm}}/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&client_id={{client_id}}&client_secret={{secret}}&username=engineer_alice&password=Engineer@123!&scope=openid
+
+###
+
+# @name admin_token
+POST {{keycloak}}/realms/{{realm}}/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&client_id={{client_id}}&client_secret={{secret}}&username=admin_user&password=Admin@123!&scope=openid
+
+### ─────────────────────────────────────────────────────────
+### 3. Authorization requests — ALLOW scenarios
+### ─────────────────────────────────────────────────────────
+
+# @name allow_analyst_read_reports
+# Paste analyst token below (from request #analyst_token above)
+POST {{base_url}}/api/authorize
+Authorization: Bearer PASTE_ANALYST_TOKEN_HERE
+Content-Type: application/json
+
+{
+  "resource": "finance-reports",
+  "action": "READ"
+}
+
+###
+
+# @name allow_engineer_read_db
+POST {{base_url}}/api/authorize
+Authorization: Bearer PASTE_ENGINEER_TOKEN_HERE
+Content-Type: application/json
+
+{
+  "resource": "prod-database",
+  "action": "READ"
+}
+
+###
+
+# @name allow_admin_user_mgmt
+POST {{base_url}}/api/authorize
+Authorization: Bearer PASTE_ADMIN_TOKEN_HERE
+Content-Type: application/json
+
+{
+  "resource": "user-management",
+  "action": "WRITE"
+}
+
+### ─────────────────────────────────────────────────────────
+### 4. Authorization requests — DENY scenarios
+### ─────────────────────────────────────────────────────────
+
+# @name deny_analyst_write_reports
+POST {{base_url}}/api/authorize
+Authorization: Bearer PASTE_ANALYST_TOKEN_HERE
+Content-Type: application/json
+
+{
+  "resource": "finance-reports",
+  "action": "WRITE"
+}
+
+###
+
+# @name deny_analyst_prod_database
+POST {{base_url}}/api/authorize
+Authorization: Bearer PASTE_ANALYST_TOKEN_HERE
+Content-Type: application/json
+
+{
+  "resource": "prod-database",
+  "action": "READ"
+}
+
+###
+
+# @name deny_engineer_delete_db
+POST {{base_url}}/api/authorize
+Authorization: Bearer PASTE_ENGINEER_TOKEN_HERE
+Content-Type: application/json
+
+{
+  "resource": "prod-database",
+  "action": "DELETE"
+}
+
+### ─────────────────────────────────────────────────────────
+### 5. Events & stats (dashboard data)
+### ─────────────────────────────────────────────────────────
+
+# @name get_events
+GET {{base_url}}/api/events?limit=20
+
+###
+
+# @name get_deny_events_only
+GET {{base_url}}/api/events?decision=DENY&limit=10
+
+###
+
+# @name get_stats
+GET {{base_url}}/api/events/stats
+
+###
+
+# @name get_sessions
+GET {{base_url}}/api/sessions
+
+### ─────────────────────────────────────────────────────────
+### 6. Policy management
+### ─────────────────────────────────────────────────────────
+
+# @name list_all_policies
+GET {{base_url}}/api/policies
+
+###
+
+# @name list_analyst_policies
+GET {{base_url}}/api/policies?role=analyst
+
+###
+
+# @name create_new_policy
+POST {{base_url}}/api/policies
+Content-Type: application/json
+
+{
+  "name": "analyst-read-audit-logs-extended",
+  "role": "analyst",
+  "resource": "audit-logs",
+  "action": "READ",
+  "effect": "ALLOW",
+  "allowed_hours_start": 7,
+  "allowed_hours_end": 19,
+  "max_risk_score": 45
+}
+
+### ─────────────────────────────────────────────────────────
+### 7. Risk engine direct test
+### ─────────────────────────────────────────────────────────
+
+# @name score_normal_request
+POST http://localhost:8001/score
+Content-Type: application/json
+
+{
+  "user_id": "test-user-001",
+  "username": "analyst_bob",
+  "ip_address": "127.0.0.1",
+  "user_agent": "Mozilla/5.0 (X11; Linux x86_64)"
+}
+
+###
+
+# @name score_suspicious_request
+POST http://localhost:8001/score
+Content-Type: application/json
+
+{
+  "user_id": "test-user-suspicious",
+  "username": "unknown",
+  "ip_address": "45.33.32.156",
+  "user_agent": "curl/7.68.0"
+}

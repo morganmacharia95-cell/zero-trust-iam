@@ -1,0 +1,136 @@
+
+services:
+
+  # ── PostgreSQL ────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: zt_postgres
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql
+      - ./infra/postgres/seed_policies.sql:/docker-entrypoint-initdb.d/02_seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - zt_internal
+
+  # ── Keycloak ──────────────────────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: zt_keycloak
+    restart: unless-stopped
+    command: start-dev --import-realm
+    env_file: .env
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      KC_DB_USERNAME: ${POSTGRES_USER}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health/ready || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - zt_internal
+
+  # ── Policy Engine ─────────────────────────────────────────
+  policy-engine:
+    build:
+      context: ./policy-engine
+      dockerfile: Dockerfile
+    container_name: zt_policy_engine
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      KEYCLOAK_URL: http://localhost:8080
+      RISK_ENGINE_URL: http://risk-engine:8001
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./policy-engine:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    networks:
+      - zt_internal
+      - zt_finance
+      - zt_engineering
+      - zt_admin
+
+  # ── Risk Engine ───────────────────────────────────────────
+  risk-engine:
+    build:
+      context: ./risk-engine
+      dockerfile: Dockerfile
+    container_name: zt_risk_engine
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./risk-engine:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - zt_internal
+
+  # ── Dashboard ─────────────────────────────────────────────
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: zt_dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      VITE_API_URL: http://localhost:8000
+    depends_on:
+      - policy-engine
+    networks:
+      - zt_internal
+
+# ── Named networks (micro-segmentation) ───────────────────
+networks:
+  zt_internal:
+    driver: bridge
+  zt_finance:
+    driver: bridge
+    internal: true
+  zt_engineering:
+    driver: bridge
+    internal: true
+  zt_admin:
+    driver: bridge
+    internal: true
+
+# ── Volumes ───────────────────────────────────────────────
+volumes:
+  postgres_data:

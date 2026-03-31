@@ -1,0 +1,77 @@
+{
+  "realm": "zero-trust-demo",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 5,
+  "roles": {
+    "realm": [
+      { "name": "admin",    "description": "Full system access" },
+      { "name": "engineer", "description": "Engineering zone access" },
+      { "name": "analyst",  "description": "Read-only finance access" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "policy-engine",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "secret": "policy-engine-secret",
+      "redirectUris": ["http://localhost:8000/*", "http://localhost:3000/*"],
+      "webOrigins": ["http://localhost:8000", "http://localhost:3000"]
+    },
+    {
+      "clientId": "dashboard",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:3000/*"],
+      "webOrigins": ["http://localhost:3000"]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin_user",
+      "enabled": true,
+      "email": "admin@zerotrust.local",
+      "firstName": "Admin",
+      "lastName": "User",
+      "credentials": [{ "type": "password", "value": "Admin@123!", "temporary": false }],
+      "realmRoles": ["admin"]
+    },
+    {
+      "username": "engineer_alice",
+      "enabled": true,
+      "email": "alice@zerotrust.local",
+      "firstName": "Alice",
+      "lastName": "Engineer",
+      "credentials": [{ "type": "password", "value": "Engineer@123!", "temporary": false }],
+      "realmRoles": ["engineer"]
+    },
+    {
+      "username": "analyst_bob",
+      "enabled": true,
+      "email": "bob@zerotrust.local",
+      "firstName": "Bob",
+      "lastName": "Analyst",
+      "credentials": [{ "type": "password", "value": "Analyst@123!", "temporary": false }],
+      "realmRoles": ["analyst"]
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+name: CI — Zero Trust IAM
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-policy-engine:
+    name: Policy engine tests
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: ./policy-engine
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio
+
+      - name: Run unit tests
+        working-directory: ./policy-engine
+        run: pytest ../tests/unit -v --cov=app --cov-report=term-missing
+
+      - name: Run attack simulations
+        working-directory: ./policy-engine
+        run: pytest ../tests/attacks -v
+
+  test-risk-engine:
+    name: Risk engine tests
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install risk engine deps
+        working-directory: ./risk-engine
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run risk engine unit tests
+        run: pytest tests/unit/test_risk_scorer.py -v
+
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      - run: ruff check policy-engine/app risk-engine/app
+
+  docker-build:
+    name: Docker build check
+    runs-on: ubuntu-22.04
+    needs: [test-policy-engine, test-risk-engine]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy env file
+        run: cp .env.example .env
+
+      - name: Build policy-engine image
+        run: docker build ./policy-engine -t zt-policy-engine:ci
+
+      - name: Build risk-engine image
+        run: docker build ./risk-engine -t zt-risk-engine:ci
