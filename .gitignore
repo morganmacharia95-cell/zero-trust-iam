@@ -42,3 +42,9 @@ policy-engine/packages/
 risk-engine/packages/
 node_modules/
 test.db
+policy-engine/venv/
+risk-engine/venv/
+policy-engine/packages/
+risk-engine/packages/
+node_modules/
+test.db
