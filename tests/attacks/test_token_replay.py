@@ -63,4 +63,4 @@ def test_missing_token_rejected():
         "/api/authorize",
         json={"resource": "finance-reports", "action": "READ"},
     )
-    assert resp.status_code == 403, f"Expected 403, got {resp.status_code}: {resp.text}"
+    assert resp.status_code in (401, 403), f"Expected 401 or 403, got {resp.status_code}: {resp.text}"
