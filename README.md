@@ -1,5 +1,7 @@
 # Zero Trust IAM Simulator
 
+[![CI](https://github.com/morganmacharia95-cell/zero-trust-iam/actions/workflows/ci.yml/badge.svg)](https://github.com/morganmacharia95-cell/zero-trust-iam/actions)
+
 A production-grade Zero Trust Identity & Access Management system built from scratch.
 Every access request is verified against identity, context, risk score, and policy —
 never trusted by default.
