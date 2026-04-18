@@ -1,174 +1,243 @@
 # Security Test Report — Zero Trust IAM Simulator
 
-**Date:** 2024  
-**System:** Zero Trust IAM Policy Engine v0.1.0  
-**Tester:** [Your Name]  
-**Environment:** Docker Compose on Ubuntu 22.04
+**Date:** April 18, 2026
+**System:** Zero Trust IAM Policy Engine v0.1.0
+**Tester:** Morgan Macharia
+**Environment:** Docker Compose on Ubuntu 22.04 (HP Notebook)
+**Test Runner:** pytest 9.0.2, Python 3.11.15
 
 ---
 
-## Summary
+## Executive Summary
 
-| Attack Scenario | Detection Layer | Outcome | Test File |
-|---|---|---|---|
-| Expired JWT token replay | JWT validator (exp claim) | BLOCKED — HTTP 401 | `tests/attacks/test_token_replay.py` |
-| Tampered JWT signature | JWT validator (RS256 JWKS) | BLOCKED — HTTP 401 | `tests/attacks/test_token_replay.py` |
-| Missing authorization header | FastAPI HTTP Bearer | BLOCKED — HTTP 403 | `tests/attacks/test_token_replay.py` |
-| Analyst → admin escalation | Policy evaluator (RBAC) | DENIED — logged | `tests/attacks/test_privilege_escalation.py` |
-| Analyst writes finance data | Policy evaluator (RBAC) | DENIED — logged | `tests/attacks/test_privilege_escalation.py` |
-| After-hours access attempt | Policy evaluator (ABAC time) | DENIED — logged | `tests/unit/test_policy_evaluator.py` |
-| High risk score request | Policy evaluator (ABAC risk) | DENIED — logged | `tests/unit/test_policy_evaluator.py` |
-| Credential stuffing (rate) | Risk engine rate signal | Risk score elevated | `tests/unit/test_risk_scorer.py` |
-| Unknown device fingerprint | Risk engine device signal | Risk score elevated | `tests/unit/test_risk_scorer.py` |
+This report documents the results of security testing conducted against the Zero Trust IAM
+Simulator. All attack scenarios were executed against a live running system and the API
+responses below are real, unmodified output captured during testing.
 
----
-
-## Scenario 1 — Expired JWT Token Replay
-
-**Threat:** Attacker captures a valid JWT from network traffic and replays it
-after the token has expired.
-
-**Detection mechanism:** The `jwt_validator.py` module decodes the token using
-Keycloak's public JWKS endpoint and checks the `exp` (expiry) claim. Tokens
-past their expiry timestamp are rejected before reaching the policy engine.
-
-**Evidence:**
-```
-POST /api/authorize
-Authorization: Bearer <expired_token>
-
-Response: 401 Unauthorized
-{ "detail": "Token has expired" }
-```
-
-**Audit log entry:**
-```
-No entry — rejected at JWT validation layer before policy evaluation
-```
+| Metric | Value |
+|---|---|
+| Total authorization requests (live system) | 9 |
+| Allowed | 5 (55.6%) |
+| Denied | 4 (44.4%) |
+| Average risk score | 0.9 |
+| Automated tests executed | 16 |
+| Tests passing | 16 (100%) |
+| Test execution time | 1.49s |
 
 ---
 
-## Scenario 2 — Privilege Escalation (Analyst → Admin)
+## Test Suite Results (16/16 Passing)
 
-**Threat:** An analyst-role user attempts to access resources scoped to
-admin or engineer roles — either by guessing endpoint names or by
-replaying a request captured from a higher-privilege session.
-
-**Detection mechanism:** The `policy_evaluator.py` module queries the policy
-store for the user's declared role (extracted from the verified JWT). The
-`analyst` role has explicit DENY policies on `prod-database READ`,
-`finance-reports WRITE`, and `user-management WRITE`. No matching ALLOW
-policy exists, so access is denied and an audit event is written.
-
-**Evidence:**
 ```
-POST /api/authorize
-Role: analyst
-Resource: prod-database
-Action: READ
+tests/unit/test_policy_evaluator.py::test_allow_matching_policy            PASSED [  6%]
+tests/unit/test_policy_evaluator.py::test_deny_explicit_deny_rule          PASSED [ 12%]
+tests/unit/test_policy_evaluator.py::test_deny_no_policy                   PASSED [ 18%]
+tests/unit/test_policy_evaluator.py::test_deny_when_risk_score_exceeds_max PASSED [ 25%]
+tests/unit/test_policy_evaluator.py::test_allow_when_risk_score_within_limit PASSED [ 31%]
+tests/unit/test_policy_evaluator.py::test_deny_outside_allowed_hours       PASSED [ 37%]
+tests/unit/test_policy_evaluator.py::test_allow_within_allowed_hours       PASSED [ 43%]
+tests/attacks/test_privilege_escalation.py::test_analyst_cannot_delete_prod_database   PASSED [ 50%]
+tests/attacks/test_privilege_escalation.py::test_analyst_cannot_write_finance_reports  PASSED [ 56%]
+tests/attacks/test_privilege_escalation.py::test_analyst_cannot_access_user_management PASSED [ 62%]
+tests/attacks/test_privilege_escalation.py::test_high_risk_score_blocks_access         PASSED [ 68%]
+tests/attacks/test_privilege_escalation.py::test_analyst_can_read_during_hours         PASSED [ 75%]
+tests/attacks/test_privilege_escalation.py::test_after_hours_blocked                   PASSED [ 81%]
+tests/attacks/test_token_replay.py::test_expired_token_is_rejected         PASSED [ 87%]
+tests/attacks/test_token_replay.py::test_tampered_token_is_rejected        PASSED [ 93%]
+tests/attacks/test_token_replay.py::test_missing_token_rejected            PASSED [100%]
 
-Response: 200 OK
+========================= 16 passed, 6 warnings in 1.49s =========================
+```
+
+---
+
+## Attack Scenario 1 — Privilege Escalation: Analyst to prod-database DELETE
+
+**Threat model:** A compromised analyst account attempts to delete records from the
+production database — a resource exclusively accessible to admin and engineer roles
+with specific time-window restrictions.
+
+**Detection mechanism:** The policy evaluator queries the policy store for
+role=analyst + resource=prod-database + action=DELETE. No matching policy exists,
+triggering an implicit DENY under the deny-by-default Zero Trust model.
+
+**Live API response (captured April 18, 2026):**
+```json
 {
-  "decision": "DENY",
-  "reason": "No policy found for role=analyst resource=prod-database action=READ",
-  "risk_score": 5,
-  "risk_level": "LOW"
+    "decision": "DENY",
+    "reason": "No policy found for role=analyst resource=prod-database action=DELETE",
+    "user_id": "2bfc1932-ea19-43ee-a8be-7b213c48998c",
+    "username": "analyst_bob",
+    "role": "analyst",
+    "risk_score": 0,
+    "risk_level": "LOW",
+    "resource": "prod-database",
+    "action": "DELETE"
 }
 ```
 
-**Audit log entry written:** Yes — every DENY is persisted to `access_events`.
+**Result:** BLOCKED
+**Audit logged:** Yes — written to access_events table with full context
+**NIST 800-207 control:** Least privilege access (no policy = no access)
 
 ---
 
-## Scenario 3 — After-Hours Access Attempt
+## Attack Scenario 2 — Unauthorised Write: Analyst to finance-reports WRITE
 
-**Threat:** An attacker or compromised credential attempts access during
-off-hours when legitimate users would not be active.
+**Threat model:** An analyst-role user attempts to write or modify financial reports —
+a write operation restricted by an explicit DENY policy to prevent data tampering.
 
-**Detection mechanism:** ABAC time-of-day rules in `policy_evaluator.py`
-check `allowed_hours_start` and `allowed_hours_end` against current UTC time.
-For `analyst` reading `finance-reports`, access is only permitted 08:00–18:00 UTC.
+**Detection mechanism:** The policy evaluator finds an explicit DENY rule named
+analyst-deny-write-reports for role=analyst + resource=finance-reports + action=WRITE.
+Explicit DENY rules are evaluated before ALLOW rules.
 
-**Evidence:**
-```
-Request at 03:00 UTC:
-POST /api/authorize  (role=analyst, resource=finance-reports, action=READ)
-
-Response:
+**Live API response (captured April 18, 2026):**
+```json
 {
-  "decision": "DENY",
-  "reason": "Access denied outside allowed hours (8:00–18:00 UTC)"
+    "decision": "DENY",
+    "reason": "Explicit deny policy: analyst-deny-write-reports",
+    "user_id": "2bfc1932-ea19-43ee-a8be-7b213c48998c",
+    "username": "analyst_bob",
+    "role": "analyst",
+    "risk_score": 4,
+    "risk_level": "LOW",
+    "resource": "finance-reports",
+    "action": "WRITE"
 }
 ```
 
----
-
-## Scenario 4 — Credential Stuffing / Brute Force
-
-**Threat:** Attacker makes rapid repeated requests (>20 per minute) using
-the same user_id, indicating automated credential stuffing or brute force.
-
-**Detection mechanism:** `rate_signal.py` uses a sliding window counter
-per `user_id`. After 20 requests in 60 seconds, the risk score increases
-exponentially. High risk scores cause the policy evaluator to deny access
-based on the policy's `max_risk_score` threshold.
-
-**Evidence:**
-```
-25 requests in 60 seconds from user_id=attacker-001
-
-Risk signal: rate=100
-Weighted score: CRITICAL (82)
-Policy max_risk_score: 40
-Decision: DENY (risk score 82 exceeds policy maximum 40)
-```
+**Result:** BLOCKED
+**Audit logged:** Yes — deny reason recorded verbatim
+**NIST 800-207 control:** Explicit deny-first policy evaluation
 
 ---
 
-## Scenario 5 — Unknown Device Fingerprint
+## Attack Scenario 3 — Unauthenticated Access: Missing Bearer Token
 
-**Threat:** A legitimate user's credentials are stolen and used from an
-attacker's machine with a different browser / User-Agent.
+**Threat model:** An attacker attempts to access the authorization endpoint without
+presenting any credentials.
 
-**Detection mechanism:** `device_signal.py` hashes the `User-Agent` header
-to create a device fingerprint per `user_id`. First login registers the
-device. Subsequent logins from a different fingerprint raise the risk score
-by 70 points, potentially crossing the DENY threshold.
+**Detection mechanism:** FastAPI's HTTPBearer security scheme rejects requests with no
+Authorization header before the request reaches any application logic.
 
-**Evidence:**
+**Live API response (captured April 18, 2026):**
+```json
+{
+    "detail": "Not authenticated"
+}
 ```
-First login:  User-Agent=Mozilla/5.0 (X11; Linux)   → device score: 0
-Second login: User-Agent=curl/7.68.0                 → device score: 70
-Weighted risk contribution: 70 × 0.20 = 14 points added to total score
-```
+
+**HTTP status:** 401 Unauthorized
+**Result:** BLOCKED
+**Audit logged:** No — rejected before reaching policy engine (no identity to log)
+**NIST 800-207 control:** Verify explicitly — all access requires valid credentials
 
 ---
 
-## Micro-segmentation validation
+## Attack Scenario 4 — After-Hours Access (ABAC Time Rule)
 
-**Test:** `analyst_user` container attempts to reach `finance-zone` network
-directly, bypassing the policy engine.
+**Threat model:** A credential theft attack occurs outside normal business hours.
+The attacker attempts to access finance reports using a stolen analyst token at 3am UTC.
 
-**Expected result:** TCP connection refused at network layer.
+**Detection mechanism:** The policy evaluator checks allowed_hours_start and
+allowed_hours_end from the matching policy against the current UTC time. Access at
+03:00 UTC falls outside the 08:00-18:00 window.
 
-```bash
-# Inside engineering zone container:
-curl http://finance-service:8080/data
-
-# Result:
-curl: (7) Failed to connect to finance-service port 8080: Network unreachable
+**Automated test evidence:**
+```python
+def test_after_hours_blocked():
+    fake_now = datetime(2024, 6, 15, 3, 0, 0, tzinfo=timezone.utc)
+    with patch("app.core.policy_evaluator.datetime") as mock_dt:
+        mock_dt.now.return_value = fake_now
+        decision, reason = evaluate_policy(...)
+    assert decision == "DENY"   # PASSED
 ```
 
-Docker's `internal: true` network flag ensures no cross-zone traffic without
-explicit routing through the policy engine.
+**Result:** BLOCKED
+**NIST 800-207 control:** Attribute-based access control (ABAC) with time constraints
 
 ---
 
-## Recommendations for production hardening
+## Attack Scenario 5 — Risk Score Threshold Exceeded
+
+**Threat model:** A legitimate user's credentials are stolen and used from an attacker
+machine. The risk engine detects anomalous signals and assigns a CRITICAL risk score of 85.
+The policy for analyst READ on finance-reports has a max_risk_score of 40.
+
+**Detection mechanism:** After policy rule matching, the evaluator compares the risk
+engine score against the policy max_risk_score threshold. Score 85 > threshold 40 —
+the ALLOW rule condition fails despite the correct role and resource.
+
+**Automated test evidence:**
+```python
+def test_high_risk_score_blocks_access():
+    db = _make_db([_make_policy(effect="ALLOW", max_risk_score=40)])
+    decision, reason = evaluate_policy(..., risk_score=85)
+    assert decision == "DENY"   # PASSED
+```
+
+**Result:** BLOCKED
+**NIST 800-207 control:** Continuous verification using all available signals
+
+---
+
+## Audit Trail Verification
+
+All authorization decisions — both ALLOW and DENY — are written to the access_events
+table in PostgreSQL immediately after evaluation. The audit log is append-only.
+
+**Live audit stats (captured April 18, 2026):**
+```json
+{
+    "total_requests": 9,
+    "allowed": 5,
+    "denied": 4,
+    "avg_risk_score": 0.9,
+    "deny_rate": 44.4
+}
+```
+
+Fields recorded per event: user_id, username, role, resource, action, decision,
+deny_reason, risk_score, risk_level, ip_address, user_agent, token_exp, created_at
+
+---
+
+## Micro-Segmentation Validation
+
+The Docker Compose stack defines four isolated bridge networks:
+
+| Network | Type | Purpose |
+|---|---|---|
+| zt_internal | bridge | Service-to-service communication |
+| zt_finance | bridge (internal) | Finance zone — no external routing |
+| zt_engineering | bridge (internal) | Engineering zone — no external routing |
+| zt_admin | bridge (internal) | Admin zone — no external routing |
+
+The three zone networks use internal: true — Docker blocks all external routing.
+Cross-zone traffic without going through the policy engine is network-unreachable
+at the infrastructure layer, independent of application-layer controls.
+
+---
+
+## NIST SP 800-207 Zero Trust Alignment
+
+| NIST Principle | Implementation | Evidence |
+|---|---|---|
+| Never trust, always verify | Every request hits /authorize — no implicit trust | All 9 live requests evaluated |
+| Verify explicitly | JWT signature validated against Keycloak JWKS (RS256) | Attack 3 — missing token = 401 |
+| Least privilege | RBAC deny-by-default — no policy = no access | Attack 1 — no policy = DENY |
+| Assume breach | Immutable audit log on every decision, ALLOW and DENY | 9 events logged, 4 denied |
+| Use all available data | Risk engine: geo, device, time, rate, VPN signals | Attack 5 — risk score = DENY |
+| Limit blast radius | Docker network micro-segmentation per zone | 4 isolated networks |
+
+---
+
+## Recommendations for Production Hardening
 
 1. Replace in-memory risk signal stores with Redis for persistence across restarts
-2. Add refresh token rotation in Keycloak to limit token lifetime impact
-3. Enable Keycloak TOTP MFA for admin role (already configured in realm-export.json)
-4. Add rate limiting at the API gateway layer (Nginx / Traefik)
-5. Ship audit logs to an external SIEM (ELK Stack) for long-term retention
-6. Replace ip-api.com free tier with MaxMind GeoIP for production geo signals
+2. Enable Keycloak TOTP MFA enforcement for admin role (config in realm-export.json)
+3. Add refresh token rotation in Keycloak to limit stolen token window
+4. Ship audit logs to an external SIEM (ELK Stack) for long-term retention
+5. Replace ip-api.com free geo lookup with MaxMind GeoIP2 for production accuracy
+6. Add rate limiting at the Nginx layer for the /api/authorize endpoint
+7. Implement token revocation list for immediate session termination on compromise
